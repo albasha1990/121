@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -106,8 +108,18 @@ func prepare(t *testing.T) (ptmx *os.File, done func()) {
 	if err != nil {
 		t.Fatalf("Error: open: %s.\n", err)
 	}
-	t.Cleanup(func() { _ = ptmx.Close() })
+	_ptmx := ptmx
+	t.Cleanup(func() { _ = _ptmx.Close() })
 	t.Cleanup(func() { _ = pts.Close() })
+
+	// z/OS doesn't open a pollable FD - fix that here
+	if runtime.GOOS == "zos" {
+		if _, err = unix.Fcntl(uintptr(ptmx.Fd()), unix.F_SETFL, unix.O_NONBLOCK); err != nil {
+			t.Fatalf("Error: zos-nonblock: %s.\n", err)
+		}
+		ptmx = os.NewFile(ptmx.Fd(), "/dev/ptmx")
+		t.Cleanup(func() { _ = ptmx.Close() })
+	}
 
 	ctx, done := context.WithCancel(context.Background())
 	t.Cleanup(done)
